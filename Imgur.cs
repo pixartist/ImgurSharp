@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Web.Script.Serialization;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
@@ -21,23 +22,57 @@ namespace ImgurSharp
         public const string UrlUpload = "https://api.imgur.com/3/image/";
         public const string UserAgent = "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; .NET CLR 1.1.4322; .NET CLR 2.0.50727)";
 
+        private JavaScriptSerializer serializer;
         private string clientID;
         private string clientSecret;
         private string user;
         private string password;
-        private string token = null;
         private CookieContainer cookies;
-
+        public struct TokenInfo
+        {
+            public string access_token { get; set; }
+            public int expires_in { get; set; }
+            public string token_type { get; set; }
+            public string scope { get; set; }
+            public string refresh_token { get; set; }
+        }
+        public struct ImageInfoContainer
+        {
+            public ImageInfo data {get; set;}
+            public bool success { get; set; }
+            public int status { get; set; }
+        }
+        public struct ImageInfo
+        {
+            public string id {get; set;}
+            public string title { get; set; }
+            public string description {get; set;}
+            public string datetime {get; set;}
+            public string type {get; set;}
+            public string animated {get; set;}
+            public int width {get; set;}
+            public int height {get; set;}
+            public int size {get; set;}
+            public int views {get; set;}
+            public int bandwidth {get; set;}
+            public bool favourite {get; set;}
+            public string nsfw {get; set;}
+            public string section {get; set;}
+            public string deletehash {get; set;}
+            public string link {get; set;}
+        }
         public Imgur(string user, string password, string clientID, string clientSecret)
         {
             this.password = password;
             this.user = user;
             this.clientID = clientID;
             this.clientSecret = clientSecret;
-            cookies = new CookieContainer();
+            this.cookies = new CookieContainer();
+            this.serializer = new JavaScriptSerializer();
         }
         public void CreateSession()
         {
+            Console.WriteLine("Creating session");
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(UrlSignin);
             HttpWebResponse response;
 
@@ -48,7 +83,7 @@ namespace ImgurSharp
             request.UserAgent = UserAgent;
             request.AllowAutoRedirect = true;
             request.KeepAlive = true;
-            request.Referer = "https://imgur.com/signin";
+            request.Referer = UrlSignin;
             request.CookieContainer = cookies;
             RequestParameters postData = new RequestParameters();
             postData["username"] = user;
@@ -59,10 +94,11 @@ namespace ImgurSharp
 
             response = (HttpWebResponse)request.GetResponse();
             cookies.Add(response.Cookies);;
-            
+            Console.WriteLine("Created session");
         }
         public string RequestPin()
         {
+            Console.WriteLine("Requesting pin");
             string pin = null;
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(UrlAuth + "?client_id=" + clientID + "&response_type=pin");
             HttpWebResponse response;
@@ -83,11 +119,13 @@ namespace ImgurSharp
             pin = pin.Substring(pin.IndexOf("?pin=") + 5);
             if (pin.Contains("&"))
                 pin = pin.Substring(0, pin.IndexOf("&"));
+            Console.WriteLine("Recieved pin: " + pin);
             return pin;
         }
-        public string RequestToken(string pin)
+        public TokenInfo RequestToken(string pin)
         {
-            string accessToken = null;
+            Console.WriteLine("Requesting token");
+            TokenInfo info;
             //get token
             using (WebClient client = new WebClient())
             {
@@ -104,18 +142,17 @@ namespace ImgurSharp
                 {
                     throw (new Exception("Could not get token response", e));
                 }
-
-                int start = response.IndexOf("token\":\"") + 8;
-                int end = response.Substring(start).IndexOf("\"");
-                accessToken = response.Substring(start, end);
+                info = serializer.Deserialize<TokenInfo>(response);
+                
             }
-
-            return accessToken;
+            Console.WriteLine("Recieved token: " + info.access_token);
+            return info;
         }
-        public string UploadImage(string title, string description, System.Drawing.Image image, string token)
+        public ImageInfoContainer UploadImage(string title, string description, System.Drawing.Image image, string token)
         {
+            ImageInfoContainer info = new ImageInfoContainer { success = false };
+            Console.WriteLine("Uploading image");
             string base64 = ImageToBase64(image, System.Drawing.Imaging.ImageFormat.Png);
-
             using (WebClient client = new WebClient())
             {
                 client.Headers.Add("Authorization", "Bearer " + token);
@@ -128,15 +165,13 @@ namespace ImgurSharp
 
                 byte[] responsePayload = client.UploadValues(UrlUpload, "POST", data);
                 string response = Encoding.ASCII.GetString(responsePayload);
-                string start = "\"link\":\"";
-                string end = "\"";
-                int i = response.IndexOf(start);
-                if(i < 0)
-                    throw(new Exception("Could not find image link in response"));
-                string url = response.Substring(i + start.Length);
-                url = url.Substring(0, url.IndexOf(end));
-                return url;
+
+                info = serializer.Deserialize<ImageInfoContainer>(response);
+                
+                
             }
+            Console.WriteLine("Uploaded image: " + info.success);
+            return info;
         }
         public string ImageToBase64(System.Drawing.Image image, System.Drawing.Imaging.ImageFormat format)
         {
